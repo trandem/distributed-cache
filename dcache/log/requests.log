@@ -1,0 +1,43 @@
+2023-04-15T14:21:46.874866+07:00 - booting up
+2023-04-15T14:21:46.875380+07:00 - starting 8 workers
+2023-04-15T14:21:46.875465+07:00 - Actix runtime found; starting in Actix runtime
+2023-04-15T14:22:04.763170+07:00 - ping
+2023-04-15T14:22:09.419821+07:00 - SIGINT received; starting forced shutdown
+2023-04-15T14:22:09.420043+07:00 - accept thread stopped
+2023-04-15T14:22:09.420074+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420187+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420329+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420403+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420490+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420585+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420650+07:00 - shutting down idle worker
+2023-04-15T14:22:09.420847+07:00 - shutting down idle worker
+2023-04-15T18:17:17.503971+07:00 - booting up
+2023-04-15T18:17:17.504924+07:00 - starting 8 workers
+2023-04-15T18:17:17.505045+07:00 - Actix runtime found; starting in Actix runtime
+2023-04-15T18:17:43.689593+07:00 - SIGINT received; starting forced shutdown
+2023-04-15T18:17:43.690056+07:00 - accept thread stopped
+2023-04-15T18:17:43.690164+07:00 - force shutdown worker, closing 1 connections
+2023-04-15T18:17:43.690249+07:00 - shutting down idle worker
+2023-04-15T18:17:43.690365+07:00 - shutting down idle worker
+2023-04-15T18:17:43.690629+07:00 - shutting down idle worker
+2023-04-15T18:17:43.690749+07:00 - shutting down idle worker
+2023-04-15T18:17:43.690891+07:00 - shutting down idle worker
+2023-04-15T18:17:43.691062+07:00 - shutting down idle worker
+2023-04-15T18:17:43.691201+07:00 - shutting down idle worker
+2023-04-15T18:17:51.834389+07:00 - booting up
+2023-04-15T18:17:51.834983+07:00 - starting 8 workers
+2023-04-15T18:17:51.835081+07:00 - Actix runtime found; starting in Actix runtime
+2023-04-15T18:42:54.747247+07:00 - booting up
+2023-04-15T18:42:54.748185+07:00 - starting 8 workers
+2023-04-15T18:42:54.748353+07:00 - Actix runtime found; starting in Actix runtime
+2023-04-15T18:43:01.714444+07:00 - SIGINT received; starting forced shutdown
+2023-04-15T18:43:01.714662+07:00 - accept thread stopped
+2023-04-15T18:43:01.714764+07:00 - shutting down idle worker
+2023-04-15T18:43:01.714897+07:00 - force shutdown worker, closing 1 connections
+2023-04-15T18:43:01.715020+07:00 - shutting down idle worker
+2023-04-15T18:43:01.715099+07:00 - shutting down idle worker
+2023-04-15T18:43:01.715208+07:00 - shutting down idle worker
+2023-04-15T18:43:01.715282+07:00 - shutting down idle worker
+2023-04-15T18:43:01.715406+07:00 - shutting down idle worker
+2023-04-15T18:43:01.715475+07:00 - shutting down idle worker
