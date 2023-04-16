@@ -6,7 +6,7 @@ pub struct GetCacheByListKeyRequest {
 }
 
 #[derive(Serialize, Debug)]
-pub struct CachedValue {
+pub struct KeyValue {
     pub key : i32,
     pub value : String,
 }

@@ -6,7 +6,7 @@ use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use lazy_static::lazy_static;
 use log::{error, info, warn};
-use crate::cache_data::dto::{GetCacheByListKeyRequest, CachedValue};
+use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue};
 use actix_web::web::Data;
 
 #[derive(Clone)]
@@ -56,24 +56,35 @@ pub async fn get_cache_by_list_key(
 ) -> impl Responder {
     let keys = body.into_inner().keys;
 
-    let mut cached_values: Vec<CachedValue> = Vec::new();
+    let mut cached_values: Vec<KeyValue> = Vec::new();
+    let mut not_exist_keys : Vec<i32> = Vec::new();
+
     for key in keys {
         if cache_manager.global_cache.is_key_exist(key).await {
-            continue;
-        }
-
-        let value = get_value_by_key(cache_manager.clone(), key).await;
-        if value.is_some() {
-            let cached_value = CachedValue {
-                key,
-                value: value.unwrap(),
-            };
+            let value = get_value_by_key(cache_manager.clone(), key).await;
+            let cached_value;
+            if value.is_some() {
+                cached_value = KeyValue {
+                    key,
+                    value: value.unwrap(),
+                };
+            } else {
+                cached_value = KeyValue {
+                    key,
+                    value: "Found key but not found value".to_owned(),
+                }
+            }
             cached_values.push(cached_value);
+        } else {
+            not_exist_keys.push(key);
         }
     }
 
+    let mut values_for_not_existed_key = cache_manager.global_cache.find_values_on_internet(not_exist_keys).await;
+    cached_values.append(&mut values_for_not_existed_key);
+
     let json_response = serde_json::json!({
-        "cached_value" : cached_values,
+        "cache_data" : cached_values,
     });
     HttpResponse::Ok().json(json_response)
 }

@@ -9,6 +9,9 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 use std::sync::Arc;
 
+use crate::cache_data::dto::KeyValue;
+use tokio::io::AsyncWriteExt;
+
 
 pub struct GlobalCache {
     num_shard: usize,
@@ -86,6 +89,35 @@ impl GlobalCache
         info!("{}", time);
         value.push_str(time.to_string().as_str());
         Some(value)
+    }
+
+    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> Vec<KeyValue> {
+        let mut results: Vec<KeyValue> = Vec::new();
+
+        for key in keys {
+            sleep(Duration::from_millis(100)).await;
+            info!("get from internet");
+            let mut value = String::new();
+            value.push_str("lol_");
+            let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+            info!("{}", time);
+            value.push_str(time.to_string().as_str());
+
+            // push key - value to cache
+            let shard = self.get_shard(key);
+            let datasource = self.datasource_center.get(shard).unwrap();
+            let mut lru_cache = datasource.write().await;
+            let value_for_cache = Arc::new(value.clone());
+            lru_cache.insert(key, value_for_cache);
+            info!("add to cache: key = {}", key);
+
+            results.push(KeyValue {
+                key,
+                value
+            });
+        }
+
+        results
     }
 
     fn get_shard(&self, k: i32) -> usize {
