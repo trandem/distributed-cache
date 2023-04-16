@@ -6,7 +6,7 @@ use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use lazy_static::lazy_static;
 use log::{error, info, warn};
-use crate::cache_data::dto::GetCacheByListKeyRequest;
+use crate::cache_data::dto::{GetCacheByListKeyRequest, CachedValue};
 use actix_web::web::Data;
 
 #[derive(Clone)]
@@ -56,16 +56,24 @@ pub async fn get_cache_by_list_key(
 ) -> impl Responder {
     let keys = body.into_inner().keys;
 
-    let mut values: Vec<String> = Vec::new();
+    let mut cached_values: Vec<CachedValue> = Vec::new();
     for key in keys {
-        let value = self::get_value_by_key(cache_manager.clone(), key).await;
+        if cache_manager.global_cache.is_key_exist(key).await {
+            continue;
+        }
+
+        let value = get_value_by_key(cache_manager.clone(), key).await;
         if value.is_some() {
-            values.push(value.unwrap());
+            let cached_value = CachedValue {
+                key,
+                value: value.unwrap(),
+            };
+            cached_values.push(cached_value);
         }
     }
 
     let json_response = serde_json::json!({
-        "values" : values,
+        "cached_value" : cached_values,
     });
     HttpResponse::Ok().json(json_response)
 }

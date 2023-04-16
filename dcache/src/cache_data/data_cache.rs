@@ -83,7 +83,7 @@ impl GlobalCache
         let mut value = String::new();
         value.push_str("lol_");
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-        info!("{}",time);
+        info!("{}", time);
         value.push_str(time.to_string().as_str());
         Some(value)
     }
@@ -94,5 +94,12 @@ impl GlobalCache
         let hash_key = s.finish();
         let shard = hash_key % self.num_shard as u64;
         shard as usize
+    }
+
+    pub async fn is_key_exist(&self, k: i32) -> bool {
+        let shard = self.get_shard(k);
+        let datasource = self.datasource_center.get(shard).unwrap();
+        let lru_cache = datasource.read().await;
+        lru_cache.contains_key(&k)
     }
 }
