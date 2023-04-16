@@ -43,8 +43,8 @@ async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> O
     if x.is_none() {
         return None;
     }
-    let x = x.unwrap().clone();
-    let y = x.as_ref().clone();
+    let x = x.unwrap().clone().await;
+    let y = x.unwrap().clone();
     println!("{:?}", y);
     Some(y)
 }
@@ -99,8 +99,8 @@ pub async fn invalid_cache(
     if x.is_none() {
         return None;
     }
-    let x = x.unwrap().clone();
-    let y = x.as_ref().clone();
+    let x = x.unwrap().clone().await;
+    let y = x.unwrap().clone();
     println!("{:?}", y);
     Some(y)
 }

@@ -8,6 +8,10 @@ use lru::LruCache;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 use std::sync::Arc;
+use futures::channel::oneshot;
+use futures::channel::oneshot::Receiver;
+use futures::future::Shared;
+use futures::FutureExt;
 
 use crate::cache_data::dto::KeyValue;
 use tokio::io::AsyncWriteExt;
@@ -16,7 +20,7 @@ use tokio::io::AsyncWriteExt;
 pub struct GlobalCache {
     num_shard: usize,
     shard_max_capacity: usize,
-    datasource_center: Vec<RwLock<HashMap<i32, Arc<String>>>>,
+    datasource_center: Vec<RwLock<HashMap<i32, Shared<Receiver<String>>>>>,
 }
 
 impl GlobalCache
@@ -40,7 +44,7 @@ impl GlobalCache
         }
     }
 
-    pub async fn get(&self, k: i32) -> Option<Arc<String>> {
+    pub async fn get(&self, k: i32) -> Option<Shared<Receiver<String>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.read().await;
@@ -61,8 +65,7 @@ impl GlobalCache
             }
             // one thread do loading data
             let value = self.find_value_internet(k).await;
-            let value = Arc::new(value.unwrap_or("-1".to_string()));
-            lru_cache.insert(k, value);
+            lru_cache.insert(k, value.shared());
 
             let value_option = lru_cache.get(&k);
             if value_option.is_none() {
@@ -72,7 +75,7 @@ impl GlobalCache
         }
     }
 
-    pub async fn invalid(&self, k: i32) -> Option<Arc<String>> {
+    pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<String>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.write().await;
@@ -80,21 +83,9 @@ impl GlobalCache
     }
 
 
-    async fn find_value_internet(&self, k: i32) -> Option<String> {
-        sleep(Duration::from_millis(100)).await;
-        info!("get from internet");
-        let mut value = String::new();
-        value.push_str("lol_");
-        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-        info!("{}", time);
-        value.push_str(time.to_string().as_str());
-        Some(value)
-    }
-
-    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> Vec<KeyValue> {
-        let mut results: Vec<KeyValue> = Vec::new();
-
-        for key in keys {
+    async fn find_value_internet(&self, k: i32) -> Receiver<String> {
+        let (sender, receiver) = oneshot::channel::<String>();
+        tokio::spawn(async {
             sleep(Duration::from_millis(100)).await;
             info!("get from internet");
             let mut value = String::new();
@@ -102,20 +93,37 @@ impl GlobalCache
             let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
             info!("{}", time);
             value.push_str(time.to_string().as_str());
+            sender.send(value)
+        });
 
-            // push key - value to cache
-            let shard = self.get_shard(key);
-            let datasource = self.datasource_center.get(shard).unwrap();
-            let mut lru_cache = datasource.write().await;
-            let value_for_cache = Arc::new(value.clone());
-            lru_cache.insert(key, value_for_cache);
-            info!("add to cache: key = {}", key);
+        receiver
+    }
 
-            results.push(KeyValue {
-                key,
-                value
-            });
-        }
+    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> Vec<KeyValue> {
+        let mut results: Vec<KeyValue> = Vec::new();
+
+        // for key in keys {
+        //     sleep(Duration::from_millis(100)).await;
+        //     info!("get from internet");
+        //     let mut value = String::new();
+        //     value.push_str("lol_");
+        //     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        //     info!("{}", time);
+        //     value.push_str(time.to_string().as_str());
+        //
+        //     // push key - value to cache
+        //     let shard = self.get_shard(key);
+        //     let datasource = self.datasource_center.get(shard).unwrap();
+        //     let mut lru_cache = datasource.write().await;
+        //     let value_for_cache = Arc::new(value.clone());
+        //     lru_cache.insert(key, value_for_cache);
+        //     info!("add to cache: key = {}", key);
+        //
+        //     results.push(KeyValue {
+        //         key,
+        //         value
+        //     });
+        // }
 
         results
     }
