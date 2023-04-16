@@ -1,16 +1,24 @@
 mod cache_data;
 
+use std::cell::RefCell;
 use std::sync::Arc;
 use cache_data::data_cache::GlobalCache;
-use actix_web::{get};
+use actix_web::{get, web};
 use lazy_static::lazy_static;
 use log::{error, info, warn};
 
-lazy_static! {
-    static ref GLOBAL_CACHE : Arc<GlobalCache> = {
-        let mut global = GlobalCache::new(10,10);
-        Arc::new(global)
-    };
+#[derive(Clone)]
+pub struct CacheManager {
+    global_cache: Arc<GlobalCache>,
+}
+
+impl CacheManager {
+    pub fn new(num_shard: usize, shard_max_capacity: usize) -> CacheManager {
+        let global_cache = Arc::new(
+            GlobalCache::new(num_shard, shard_max_capacity)
+        );
+        CacheManager { global_cache }
+    }
 }
 
 #[get("/ping")]
@@ -20,13 +28,25 @@ pub async fn ping() -> String {
 }
 
 #[get("/get_cache")]
-pub async fn get_cache<'a>() -> Option<&'a str> {
-    let mut global = GlobalCache::new(10,10);
-    let x = global.get(Arc::new(1)).await;
+pub async fn get_cache<>(mut cache_manager: web::Data<Arc<CacheManager>>) -> Option<String> {
+    let x = cache_manager.global_cache.get(1).await;
     if x.is_none() {
         return None;
     }
-    println!("{:?}",x);
-    Some("lol")
+    let x = x.unwrap().clone();
+    let y = x.as_ref().clone();
+    println!("{:?}", y);
+    Some(y)
+}
+#[get("/invalid_cache")]
+pub async fn invalid_cache<>(mut cache_manager: web::Data<Arc<CacheManager>>) -> Option<String> {
+    let x = cache_manager.global_cache.invalid(1).await;
+    if x.is_none() {
+        return None;
+    }
+    let x = x.unwrap().clone();
+    let y = x.as_ref().clone();
+    println!("{:?}", y);
+    Some(y)
 }
 
