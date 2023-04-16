@@ -7,7 +7,7 @@ use actix_web::dev::Server;
 use dotenv::dotenv;
 use log::{error, info, warn};
 use log4rs;
-use dcache::{CacheManager, get_cache, invalid_cache, ping};
+use dcache::{CacheManager, get_cache, invalid_cache, get_cache_by_list_key, ping};
 use cache_data::data_cache::GlobalCache;
 use futures::future;
 
@@ -27,6 +27,7 @@ async fn main() -> std::io::Result<()> {
             .service(ping)
             .service(get_cache)
             .service(invalid_cache)
+            .service(get_cache_by_list_key)
             .app_data(web::Data::new(manager1.clone()))
     })
         .bind(("0.0.0.0", 9111))?
@@ -36,6 +37,7 @@ async fn main() -> std::io::Result<()> {
             .service(ping)
             .service(get_cache)
             .service(invalid_cache)
+            .service(get_cache_by_list_key)
             .app_data(web::Data::new(manager2.clone()))
     })
         .bind(("0.0.0.0", 9112))?

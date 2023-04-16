@@ -36,6 +36,7 @@ impl GlobalCache
             datasource_center,
         }
     }
+
     pub async fn get(&self, k: i32) -> Option<Arc<String>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
