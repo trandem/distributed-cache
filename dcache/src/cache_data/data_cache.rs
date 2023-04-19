@@ -1,20 +1,17 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use log::{info, warn};
-use lru::LruCache;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use log::info;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use std::sync::Arc;
 use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
 
 use crate::cache_data::dto::KeyValue;
-use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc::channel;
 
 
 pub struct GlobalCache {
@@ -99,33 +96,29 @@ impl GlobalCache
         receiver
     }
 
-    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> Vec<KeyValue> {
-        let mut results: Vec<KeyValue> = Vec::new();
+    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> tokio::sync::mpsc::Receiver<KeyValue> {
+        let (sender, receiver) = channel(keys.len());
 
-        // for key in keys {
-        //     sleep(Duration::from_millis(100)).await;
-        //     info!("get from internet");
-        //     let mut value = String::new();
-        //     value.push_str("lol_");
-        //     let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-        //     info!("{}", time);
-        //     value.push_str(time.to_string().as_str());
-        //
-        //     // push key - value to cache
-        //     let shard = self.get_shard(key);
-        //     let datasource = self.datasource_center.get(shard).unwrap();
-        //     let mut lru_cache = datasource.write().await;
-        //     let value_for_cache = Arc::new(value.clone());
-        //     lru_cache.insert(key, value_for_cache);
-        //     info!("add to cache: key = {}", key);
-        //
-        //     results.push(KeyValue {
-        //         key,
-        //         value
-        //     });
-        // }
+        for key in keys {
+            let sender_clone = sender.clone();
+            tokio::spawn(async move {
+                sleep(Duration::from_millis(100)).await;
+                info!("get from internet in thread for key {}", key);
 
-        results
+                let mut value = String::new();
+                value.push_str("lol_");
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                info!("{}", time);
+                value.push_str(time.to_string().as_str());
+
+                sender_clone.send(KeyValue {
+                    key,
+                    value,
+                }).await;
+            });
+        }
+
+        receiver
     }
 
     fn get_shard(&self, k: i32) -> usize {

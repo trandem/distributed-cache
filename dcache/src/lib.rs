@@ -1,11 +1,9 @@
 mod cache_data;
 
-use std::cell::RefCell;
 use std::sync::Arc;
 use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
-use lazy_static::lazy_static;
-use log::{error, info, warn};
+use log::info;
 use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue};
 use actix_web::web::Data;
 
@@ -51,13 +49,13 @@ async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> O
 
 #[post("/get_caches/")]
 pub async fn get_cache_by_list_key(
-    mut cache_manager: web::Data<Arc<CacheManager>>,
+    cache_manager: Data<Arc<CacheManager>>,
     body: web::Json<GetCacheByListKeyRequest>,
 ) -> impl Responder {
     let keys = body.into_inner().keys;
 
     let mut cached_values: Vec<KeyValue> = Vec::new();
-    let mut not_exist_keys : Vec<i32> = Vec::new();
+    let mut not_exist_keys: Vec<i32> = Vec::new();
 
     for key in keys {
         if cache_manager.global_cache.is_key_exist(key).await {
@@ -80,8 +78,13 @@ pub async fn get_cache_by_list_key(
         }
     }
 
-    let mut values_for_not_existed_key = cache_manager.global_cache.find_values_on_internet(not_exist_keys).await;
-    cached_values.append(&mut values_for_not_existed_key);
+    let mut receiver = cache_manager.global_cache.find_values_on_internet(not_exist_keys).await;
+    let mut data_for_not_existed_key = vec![];
+    while let Some(key_value) = receiver.recv().await {
+        data_for_not_existed_key.push(key_value);
+    }
+
+    cached_values.append(&mut data_for_not_existed_key);
 
     let json_response = serde_json::json!({
         "cache_data" : cached_values,
