@@ -5,7 +5,7 @@ pub struct GetCacheByListKeyRequest {
     pub keys : Vec<i32>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct KeyValue {
     pub key : i32,
     pub value : String,

@@ -1,6 +1,8 @@
 mod cache_data;
 
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::Duration;
 use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use log::info;
@@ -37,6 +39,7 @@ pub async fn get_cache(
 }
 
 async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> Option<String> {
+    sleep(Duration::from_secs(10));
     let x = cache_manager.global_cache.get(key).await;
     if x.is_none() {
         return None;
@@ -78,13 +81,19 @@ pub async fn get_cache_by_list_key(
         }
     }
 
-    let mut receiver = cache_manager.global_cache.find_values_on_internet(not_exist_keys).await;
-    let mut data_for_not_existed_key = vec![];
-    while let Some(key_value) = receiver.recv().await {
-        data_for_not_existed_key.push(key_value);
+    let mut data_for_not_exist_keys: Vec<KeyValue> = vec![];
+    for key in not_exist_keys {
+        let cache_manager_clone = cache_manager.clone();
+        data_for_not_exist_keys.push(tokio::spawn(async move {
+            let value = get_value_by_key(cache_manager_clone, key).await.unwrap();
+            KeyValue {
+                key,
+                value,
+            }
+            }).await.unwrap()
+        );
     }
-
-    cached_values.append(&mut data_for_not_existed_key);
+    cached_values.append(&mut data_for_not_exist_keys);
 
     let json_response = serde_json::json!({
         "cache_data" : cached_values,

@@ -96,31 +96,6 @@ impl GlobalCache
         receiver
     }
 
-    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> tokio::sync::mpsc::Receiver<KeyValue> {
-        let (sender, receiver) = channel(keys.len());
-
-        for key in keys {
-            let sender_clone = sender.clone();
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(100)).await;
-                info!("get from internet in thread for key {}", key);
-
-                let mut value = String::new();
-                value.push_str("lol_");
-                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-                info!("{}", time);
-                value.push_str(time.to_string().as_str());
-
-                sender_clone.send(KeyValue {
-                    key,
-                    value,
-                }).await;
-            });
-        }
-
-        receiver
-    }
-
     fn get_shard(&self, k: i32) -> usize {
         let mut s = DefaultHasher::new();
         k.hash(&mut s);
