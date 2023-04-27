@@ -9,10 +9,7 @@ use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
-
 use crate::cache_data::dto::KeyValue;
-use tokio::sync::mpsc::channel;
-
 
 pub struct GlobalCache {
     num_shard: usize,
@@ -70,6 +67,47 @@ impl GlobalCache
             }
             return Some(value_option.unwrap().clone());
         }
+    }
+
+    pub async fn get_with_channel(&self, key: i32, sender: tokio::sync::mpsc::Sender<KeyValue>) {
+        println!("---- begin sleep: key = {}, time = {}", key, chrono::Local::now());
+        let _ = sleep(Duration::from_secs(10));
+        let shard = self.get_shard(key);
+        let datasource = self.datasource_center.get(shard).unwrap();
+        let mut lru_cache = datasource.read().await;
+
+        let value_option = lru_cache.get(&key);
+        if value_option.is_some() {
+            let value = value_option.unwrap().clone().await.unwrap();
+            sender.send(KeyValue {
+                key,
+                value,
+            })
+                .await
+                .expect("TODO: panic message");
+            return;
+        }
+
+        drop(lru_cache);
+        let mut lru_cache = datasource.write().await;
+        let value = self.find_value_internet(key).await;
+        lru_cache.insert(key, value.shared());
+        let value_option = lru_cache.get(&key);
+        if value_option.is_none() {
+            sender.send(KeyValue {
+                key,
+                value: "no value at all".to_owned(),
+            }).await.expect("TODO: panic message");
+            return;
+        }
+
+        let value = value_option.unwrap().clone().await.unwrap();
+        sender.send(KeyValue {
+            key,
+            value,
+        })
+            .await
+            .expect("TODO: panic message");
     }
 
     pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<String>>> {

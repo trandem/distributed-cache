@@ -2,12 +2,13 @@ mod cache_data;
 
 use std::sync::Arc;
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use log::info;
 use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue};
 use actix_web::web::Data;
+use tokio::task::JoinHandle;
 
 #[derive(Clone)]
 pub struct CacheManager {
@@ -39,14 +40,15 @@ pub async fn get_cache(
 }
 
 async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> Option<String> {
-    sleep(Duration::from_secs(10));
+    println!("---- begin sleep : time = {}", chrono::Local::now());
+    sleep(Duration::from_secs(5));
     let x = cache_manager.global_cache.get(key).await;
     if x.is_none() {
         return None;
     }
     let x = x.unwrap().clone().await;
     let y = x.unwrap().clone();
-    println!("{:?}", y);
+    println!("y = {:?}", y);
     Some(y)
 }
 
@@ -80,18 +82,33 @@ pub async fn get_cache_by_list_key(
             not_exist_keys.push(key);
         }
     }
+    let key_size = not_exist_keys.len();
 
-    let mut data_for_not_exist_keys: Vec<KeyValue> = vec![];
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(key_size);
+    let mut data_handles: Vec<JoinHandle<()>> = vec![];
     for key in not_exist_keys {
         let cache_manager_clone = cache_manager.clone();
-        data_for_not_exist_keys.push(tokio::spawn(async move {
-            let value = get_value_by_key(cache_manager_clone, key).await.unwrap();
-            KeyValue {
-                key,
-                value,
-            }
-            }).await.unwrap()
-        );
+        let sender_clone = sender.clone();
+        let handle = tokio::spawn(async move {
+            cache_manager_clone.global_cache.get_with_channel(key, sender_clone).await;
+        });
+        data_handles.push(handle);
+    }
+    
+    for handle in data_handles {
+        handle.await.expect("TODO: panic message");
+    }
+
+    let mut count = 0;
+    let mut data_for_not_exist_keys: Vec<KeyValue> = vec![];
+    while let Some(key_value) = receiver.recv().await {
+        data_for_not_exist_keys.push(key_value);
+        count +=1;
+        println!("count = {:?}", count);
+
+        if count == key_size {
+            receiver.close();
+        }
     }
     cached_values.append(&mut data_for_not_exist_keys);
 
