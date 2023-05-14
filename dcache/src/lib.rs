@@ -4,7 +4,7 @@ use std::sync::Arc;
 use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use log::info;
-use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, UserData};
+use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, MySqlDataRepo, UserData};
 use actix_web::web::Data;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 use sqlx::{MySql, Pool};
@@ -15,9 +15,10 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn new(num_shard: usize, shard_max_capacity: usize , sqlx: Pool<MySql>) -> CacheManager {
+    pub fn new(num_shard: usize, shard_max_capacity: usize, sqlx: Pool<MySql>) -> CacheManager {
+        let repo = MySqlDataRepo { sql_pool: sqlx };
         let global_cache = Arc::new(
-            GlobalCache::new(num_shard, shard_max_capacity, sqlx)
+            GlobalCache::new(num_shard, shard_max_capacity, repo)
         );
         CacheManager { global_cache }
     }

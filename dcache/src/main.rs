@@ -17,12 +17,14 @@ async fn main() -> std::io::Result<()> {
     info!("booting up");
     dotenv().ok();
 
+    let host: String = env::var("sql.jdbc.url").unwrap().parse().unwrap();
+    let db: String = env::var("sql.db").unwrap().parse().unwrap();
+    let user_name: String = env::var("sql.user").unwrap().parse().unwrap();
+    let pass_word: String = env::var("sql.pass").unwrap().parse().unwrap();
     let opts = MySqlConnectOptions::new()
-        .host("127.0.0.1")
-        .port(3306)
-        .database("db_for_test")
-        .username("code_user")
-        .password("stardustDragon1357!!!");
+        .host(host.as_str())
+        .username(user_name.as_str())
+        .password(pass_word.as_str());
 
     let sql_pool = MySqlPoolOptions::new()
         .max_connections(5)
@@ -32,7 +34,6 @@ async fn main() -> std::io::Result<()> {
     let shard_size: usize = env::var("cache.shard.max_capacity").unwrap().parse().unwrap();
     let cache_manager = Arc::new(CacheManager::new(num_shard, shard_size, sql_pool));
     let manager1 = cache_manager.clone();
-
 
 
     HttpServer::new(move || {

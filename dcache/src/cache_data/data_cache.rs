@@ -13,20 +13,21 @@ use futures::FutureExt;
 use sqlx::{MySql, Pool, Row};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 
-use crate::cache_data::dto::{DataRepo, KeyValue, UserData};
+use crate::cache_data::dto::{MySqlDataRepo, KeyValue, UserData};
 use tokio::sync::mpsc::channel;
+use crate::cache_data::dto;
 
 
 pub struct GlobalCache {
     num_shard: usize,
     shard_max_capacity: usize,
     datasource_center: Vec<RwLock<HashMap<i32, Shared<Receiver<UserData>>>>>,
-    data_repo: DataRepo,
+    data_repo: MySqlDataRepo,
 }
 
 impl GlobalCache
 {
-    pub fn new(num_shard: usize, shard_max_capacity: usize, sqlx : Pool<MySql>) -> GlobalCache {
+    pub fn new(num_shard: usize, shard_max_capacity: usize,data_repo:MySqlDataRepo) -> GlobalCache {
         if num_shard == 0 {
             panic!("num_shard is zero");
         }
@@ -42,7 +43,7 @@ impl GlobalCache
             num_shard,
             shard_max_capacity,
             datasource_center,
-            data_repo: DataRepo { sql_pool: sqlx },
+            data_repo:data_repo,
         }
     }
 
@@ -95,7 +96,7 @@ impl GlobalCache
             }
         }
         if !not_existed_keys.is_empty() {
-            self.find_values_from_internet(&not_existed_keys,&mut output).await;
+            self.find_values_from_internet(&not_existed_keys, &mut output).await;
         }
         output
     }
@@ -118,30 +119,24 @@ impl GlobalCache
             results.push(Some(value_option.unwrap().clone()));
         }
 
-        let sql_pool = self.data_repo.sql_pool.clone();
+        let sql_pool = self.data_repo.clone();
+
         tokio::spawn(async move {
             let keys: Vec<i32> = data.keys().cloned().collect();
 
-            let params = format!("?{}", ", ?".repeat(keys.len()-1));
-            let query_str = format!("SELECT id, name FROM user_data WHERE id IN ( { } )", params);
-            let mut query = sqlx::query_as::<_, UserData>(&query_str);
-            for i in keys.iter() {
-                let i = *i;
-                query = query.bind(i);
-            }
+            let rows = sql_pool.find_by_mul_key(&keys).await;
 
-            let rows = query.fetch_all(&sql_pool).await;
-            let mut map = rows.unwrap().iter()
-                .map(|data| (data.id,data.clone()))
-                .collect::<HashMap<i32,UserData>>();
+            let mut map = rows.iter()
+                .map(|data| (data.id.unwrap(), data.clone()))
+                .collect::<HashMap<i32, UserData>>();
 
             for key in keys.iter() {
                 let key = *key;
                 let sender = data.remove(&key).unwrap();
                 match map.remove(&key) {
-                    None => sender.send(UserData {id: key , name: "Not found".to_owned(), }),
-                    Some(d) =>sender.send(d)
-                };
+                    None => sender.send(dto::EMPTY_DATA),
+                    Some(d) => sender.send(d)
+                }.expect("TODO: panic message");
             }
         });
     }
@@ -156,26 +151,9 @@ impl GlobalCache
 
     async fn find_value_internet(&self, k: i32) -> Receiver<UserData> {
         let (sender, receiver) = oneshot::channel::<UserData>();
-        let sql_pool =  self.data_repo.sql_pool.clone();
+        let sql_pool = self.data_repo.clone();
         tokio::spawn(async move {
-            let row = sqlx::query_as::<_, UserData>("SELECT id, name from user_data WHERE id = ?")
-                .bind(k)
-                .fetch_one(&sql_pool)
-                .await;
-
-            let mut user_data;
-            match row {
-                Ok(data) => {
-                    user_data = data;
-                },
-                Err(e) => {
-                    user_data = UserData {
-                        id : k,
-                        name: "".to_owned(),
-                    }
-                }
-            }
-
+            let user_data = sql_pool.find_by_key(k).await;
             sender.send(user_data)
         });
 
