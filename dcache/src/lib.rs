@@ -4,8 +4,10 @@ use std::sync::Arc;
 use cache_data::data_cache::GlobalCache;
 use actix_web::{get, post, web, Responder, HttpResponse};
 use log::info;
-use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue};
+use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, UserData};
 use actix_web::web::Data;
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use sqlx::{MySql, Pool};
 
 #[derive(Clone)]
 pub struct CacheManager {
@@ -13,9 +15,9 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn new(num_shard: usize, shard_max_capacity: usize) -> CacheManager {
+    pub fn new(num_shard: usize, shard_max_capacity: usize , sqlx: Pool<MySql>) -> CacheManager {
         let global_cache = Arc::new(
-            GlobalCache::new(num_shard, shard_max_capacity)
+            GlobalCache::new(num_shard, shard_max_capacity, sqlx)
         );
         CacheManager { global_cache }
     }
@@ -29,14 +31,35 @@ pub async fn ping() -> String {
 
 #[get("/get_cache/{key}")]
 pub async fn get_cache(
-    cache_manager: web::Data<Arc<CacheManager>>,
+    cache_manager: Data<Arc<CacheManager>>,
     path: web::Path<(i32, )>,
-) -> Option<String> {
+) -> impl Responder {
     let key: i32 = path.into_inner().0;
-    get_value_by_key(cache_manager.clone(), key).await
+    let value = get_value_by_key(cache_manager.clone(), key).await;
+
+    let mut key_value: KeyValue;
+    match value {
+        Some(val) => {
+            key_value = KeyValue {
+                key,
+                value: Some(val),
+            }
+        }
+        None => {
+            key_value = KeyValue {
+                key,
+                value: None,
+            }
+        }
+    }
+
+    let json_response = serde_json::json!({
+        "result" : key_value,
+    });
+    HttpResponse::Ok().json(json_response)
 }
 
-async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> Option<String> {
+async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> Option<UserData> {
     let cache_data = cache_manager.global_cache.find_by_key(key).await;
     if cache_data.is_none() {
         return None;
