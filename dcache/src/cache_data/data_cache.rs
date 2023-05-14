@@ -1,6 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use log::info;
 use tokio::sync::RwLock;
@@ -41,7 +42,7 @@ impl GlobalCache
         }
     }
 
-    pub async fn get(&self, k: i32) -> Option<Shared<Receiver<String>>> {
+    pub async fn find_by_key(&self, k: i32) -> Option<Shared<Receiver<String>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.read().await;
@@ -72,6 +73,66 @@ impl GlobalCache
         }
     }
 
+    pub async fn find_by_keys(&self, list_key: &Vec<i32>) -> Vec<Option<Shared<Receiver<String>>>> {
+        let mut output = Vec::with_capacity(list_key.len());
+        let mut not_existed_keys = vec![];
+
+        for k in list_key.iter() {
+            let k = *k;
+            let shard = self.get_shard(k);
+            let datasource = self.datasource_center.get(shard).unwrap();
+            let lru_cache = datasource.read().await;
+            let value_option = lru_cache.get(&k);
+
+            if value_option.is_some() {
+                output.push(Some(value_option.unwrap().clone()))
+            } else {
+                not_existed_keys.push(k);
+            }
+        }
+        if !not_existed_keys.is_empty() {
+            self.find_values_from_internet(&not_existed_keys,&mut output).await;
+        }
+        output
+    }
+
+    async fn find_values_from_internet(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<String>>>>) {
+        info!("find internet with keys {:?}",list_keys);
+        let mut data = HashMap::new();
+        for key in list_keys.iter() {
+            let key = *key;
+            let (sender, receiver) = oneshot::channel::<String>();
+            data.insert(key, sender);
+
+            let shard = self.get_shard(key);
+
+            let datasource = self.datasource_center.get(shard).unwrap();
+            let mut lru_cache = datasource.write().await;
+            lru_cache.insert(key, receiver.shared());
+            let value_option = lru_cache.get(&key);
+
+            results.push(Some(value_option.unwrap().clone()));
+        }
+
+        tokio::spawn(async move {
+            let keys: Vec<i32> = data.keys().cloned().collect();
+            sleep(Duration::from_millis(100)).await;
+            for key in keys.iter() {
+                let key = *key;
+                let sender = data.remove(&key).unwrap();
+
+                let mut value = String::new();
+                value.push_str("lol_");
+                value.push_str(key.to_string().as_str());
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+                value.push_str("_");
+                value.push_str(time.to_string().as_str());
+
+                sender.send(value).expect("TODO: panic message");
+            }
+        });
+    }
+
     pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<String>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
@@ -82,41 +143,14 @@ impl GlobalCache
 
     async fn find_value_internet(&self, k: i32) -> Receiver<String> {
         let (sender, receiver) = oneshot::channel::<String>();
-        tokio::spawn(async {
+        tokio::spawn(async move {
             sleep(Duration::from_millis(100)).await;
             info!("get from internet");
             let mut value = String::new();
             value.push_str("lol_");
-            let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-            info!("{}", time);
-            value.push_str(time.to_string().as_str());
+            value.push_str(k.to_string().as_str());
             sender.send(value)
         });
-
-        receiver
-    }
-
-    pub async fn find_values_on_internet(&self, keys: Vec<i32>) -> tokio::sync::mpsc::Receiver<KeyValue> {
-        let (sender, receiver) = channel(keys.len());
-
-        for key in keys {
-            let sender_clone = sender.clone();
-            tokio::spawn(async move {
-                sleep(Duration::from_millis(100)).await;
-                info!("get from internet in thread for key {}", key);
-
-                let mut value = String::new();
-                value.push_str("lol_");
-                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-                info!("{}", time);
-                value.push_str(time.to_string().as_str());
-
-                sender_clone.send(KeyValue {
-                    key,
-                    value,
-                }).await;
-            });
-        }
 
         receiver
     }

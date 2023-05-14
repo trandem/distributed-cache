@@ -37,57 +37,32 @@ pub async fn get_cache(
 }
 
 async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> Option<String> {
-    let x = cache_manager.global_cache.get(key).await;
-    if x.is_none() {
+    let cache_data = cache_manager.global_cache.find_by_key(key).await;
+    if cache_data.is_none() {
         return None;
     }
-    let x = x.unwrap().clone().await;
-    let y = x.unwrap().clone();
-    println!("{:?}", y);
-    Some(y)
+    let result = cache_data.unwrap().clone().await;
+    Some(result.unwrap().clone())
 }
 
-#[post("/get_caches/")]
+#[post("/get_caches")]
 pub async fn get_cache_by_list_key(
     cache_manager: Data<Arc<CacheManager>>,
     body: web::Json<GetCacheByListKeyRequest>,
 ) -> impl Responder {
     let keys = body.into_inner().keys;
+    let output = cache_manager.global_cache.find_by_keys(&keys).await;
 
-    let mut cached_values: Vec<KeyValue> = Vec::new();
-    let mut not_exist_keys: Vec<i32> = Vec::new();
-
-    for key in keys {
-        if cache_manager.global_cache.is_key_exist(key).await {
-            let value = get_value_by_key(cache_manager.clone(), key).await;
-            let cached_value;
-            if value.is_some() {
-                cached_value = KeyValue {
-                    key,
-                    value: value.unwrap(),
-                };
-            } else {
-                cached_value = KeyValue {
-                    key,
-                    value: "Found key but not found value".to_owned(),
-                }
-            }
-            cached_values.push(cached_value);
-        } else {
-            not_exist_keys.push(key);
+    let mut result = Vec::with_capacity(output.len());
+    for op in output.iter() {
+        if op.is_some() {
+            let data = op.clone().unwrap().await.unwrap().clone();
+            result.push(data);
         }
     }
 
-    let mut receiver = cache_manager.global_cache.find_values_on_internet(not_exist_keys).await;
-    let mut data_for_not_existed_key = vec![];
-    while let Some(key_value) = receiver.recv().await {
-        data_for_not_existed_key.push(key_value);
-    }
-
-    cached_values.append(&mut data_for_not_existed_key);
-
     let json_response = serde_json::json!({
-        "cache_data" : cached_values,
+        "result" : result,
     });
     HttpResponse::Ok().json(json_response)
 }
@@ -98,13 +73,10 @@ pub async fn invalid_cache(
     path: web::Path<(i32, )>,
 ) -> Option<String> {
     let key = path.into_inner().0;
-    let x = cache_manager.global_cache.invalid(key).await;
-    if x.is_none() {
+    let cache_data = cache_manager.global_cache.invalid(key).await;
+    if cache_data.is_none() {
         return None;
     }
-    let x = x.unwrap().clone().await;
-    let y = x.unwrap().clone();
-    println!("{:?}", y);
-    Some(y)
+    Some("success".to_string())
 }
 
