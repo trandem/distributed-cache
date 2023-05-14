@@ -3,12 +3,10 @@ mod cache_data;
 use std::{env};
 use std::sync::Arc;
 use actix_web::{App, HttpServer, web};
-use actix_web::dev::Server;
 use dotenv::dotenv;
-use log::{error, info, warn};
+use log::info;
 use log4rs;
 use dcache::{CacheManager, get_cache, invalid_cache, get_cache_by_list_key, ping};
-use cache_data::data_cache::GlobalCache;
 use futures::future;
 
 
