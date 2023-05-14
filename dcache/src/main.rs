@@ -17,18 +17,10 @@ async fn main() -> std::io::Result<()> {
     info!("booting up");
     dotenv().ok();
 
-    let host: String = env::var("sql.jdbc.url").unwrap().parse().unwrap();
-    let db: String = env::var("sql.db").unwrap().parse().unwrap();
-    let user_name: String = env::var("sql.user").unwrap().parse().unwrap();
-    let pass_word: String = env::var("sql.pass").unwrap().parse().unwrap();
-    let opts = MySqlConnectOptions::new()
-        .host(host.as_str())
-        .username(user_name.as_str())
-        .password(pass_word.as_str());
-
+    let mysql_url: String = env::var("mysql.url").unwrap().parse().unwrap();
     let sql_pool = MySqlPoolOptions::new()
         .max_connections(5)
-        .connect_with(opts).await.unwrap();
+        .connect(&mysql_url).await.unwrap();
 
     let num_shard: usize = env::var("cache.shard.num").unwrap().parse().unwrap();
     let shard_size: usize = env::var("cache.shard.max_capacity").unwrap().parse().unwrap();
