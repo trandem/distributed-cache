@@ -10,20 +10,23 @@ use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
+use sqlx::{MySql, Pool, Row};
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 
-use crate::cache_data::dto::KeyValue;
+use crate::cache_data::dto::{DataRepo, KeyValue, UserData};
 use tokio::sync::mpsc::channel;
 
 
 pub struct GlobalCache {
     num_shard: usize,
     shard_max_capacity: usize,
-    datasource_center: Vec<RwLock<HashMap<i32, Shared<Receiver<String>>>>>,
+    datasource_center: Vec<RwLock<HashMap<i32, Shared<Receiver<UserData>>>>>,
+    data_repo: DataRepo,
 }
 
 impl GlobalCache
 {
-    pub fn new(num_shard: usize, shard_max_capacity: usize) -> GlobalCache {
+    pub fn new(num_shard: usize, shard_max_capacity: usize, sqlx : Pool<MySql>) -> GlobalCache {
         if num_shard == 0 {
             panic!("num_shard is zero");
         }
@@ -39,10 +42,11 @@ impl GlobalCache
             num_shard,
             shard_max_capacity,
             datasource_center,
+            data_repo: DataRepo { sql_pool: sqlx },
         }
     }
 
-    pub async fn find_by_key(&self, k: i32) -> Option<Shared<Receiver<String>>> {
+    pub async fn find_by_key(&self, k: i32) -> Option<Shared<Receiver<UserData>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.read().await;
@@ -73,7 +77,7 @@ impl GlobalCache
         }
     }
 
-    pub async fn find_by_keys(&self, list_key: &Vec<i32>) -> Vec<Option<Shared<Receiver<String>>>> {
+    pub async fn find_by_keys(&self, list_key: &Vec<i32>) -> Vec<Option<Shared<Receiver<UserData>>>> {
         let mut output = Vec::with_capacity(list_key.len());
         let mut not_existed_keys = vec![];
 
@@ -96,12 +100,12 @@ impl GlobalCache
         output
     }
 
-    async fn find_values_from_internet(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<String>>>>) {
+    async fn find_values_from_internet(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<UserData>>>>) {
         info!("find internet with keys {:?}",list_keys);
         let mut data = HashMap::new();
         for key in list_keys.iter() {
             let key = *key;
-            let (sender, receiver) = oneshot::channel::<String>();
+            let (sender, receiver) = oneshot::channel::<UserData>();
             data.insert(key, sender);
 
             let shard = self.get_shard(key);
@@ -114,26 +118,35 @@ impl GlobalCache
             results.push(Some(value_option.unwrap().clone()));
         }
 
+        let sql_pool = self.data_repo.sql_pool.clone();
         tokio::spawn(async move {
             let keys: Vec<i32> = data.keys().cloned().collect();
-            sleep(Duration::from_millis(100)).await;
+
+            let params = format!("?{}", ", ?".repeat(keys.len()-1));
+            let query_str = format!("SELECT id, name FROM user_data WHERE id IN ( { } )", params);
+            let mut query = sqlx::query_as::<_, UserData>(&query_str);
+            for i in keys.iter() {
+                let i = *i;
+                query = query.bind(i);
+            }
+
+            let rows = query.fetch_all(&sql_pool).await;
+            let mut map = rows.unwrap().iter()
+                .map(|data| (data.id,data.clone()))
+                .collect::<HashMap<i32,UserData>>();
+
             for key in keys.iter() {
                 let key = *key;
                 let sender = data.remove(&key).unwrap();
-
-                let mut value = String::new();
-                value.push_str("lol_");
-                value.push_str(key.to_string().as_str());
-                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
-                value.push_str("_");
-                value.push_str(time.to_string().as_str());
-
-                sender.send(value).expect("TODO: panic message");
+                match map.remove(&key) {
+                    None => sender.send(UserData {id: key , name: "Not found".to_owned(), }),
+                    Some(d) =>sender.send(d)
+                };
             }
         });
     }
 
-    pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<String>>> {
+    pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<UserData>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.write().await;
@@ -141,15 +154,29 @@ impl GlobalCache
     }
 
 
-    async fn find_value_internet(&self, k: i32) -> Receiver<String> {
-        let (sender, receiver) = oneshot::channel::<String>();
+    async fn find_value_internet(&self, k: i32) -> Receiver<UserData> {
+        let (sender, receiver) = oneshot::channel::<UserData>();
+        let sql_pool =  self.data_repo.sql_pool.clone();
         tokio::spawn(async move {
-            sleep(Duration::from_millis(100)).await;
-            info!("get from internet");
-            let mut value = String::new();
-            value.push_str("lol_");
-            value.push_str(k.to_string().as_str());
-            sender.send(value)
+            let row = sqlx::query_as::<_, UserData>("SELECT id, name from user_data WHERE id = ?")
+                .bind(k)
+                .fetch_one(&sql_pool)
+                .await;
+
+            let mut user_data;
+            match row {
+                Ok(data) => {
+                    user_data = data;
+                },
+                Err(e) => {
+                    user_data = UserData {
+                        id : k,
+                        name: "".to_owned(),
+                    }
+                }
+            }
+
+            sender.send(user_data)
         });
 
         receiver
