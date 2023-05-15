@@ -1,13 +1,15 @@
-mod cache_data;
-
 use std::sync::Arc;
-use cache_data::data_cache::GlobalCache;
-use actix_web::{get, post, web, Responder, HttpResponse};
-use log::info;
-use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, MySqlDataRepo, UserData};
+
+use actix_web::{get, HttpResponse, post, Responder, web};
 use actix_web::web::Data;
-use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use log::info;
 use sqlx::{MySql, Pool};
+
+use cache_data::data_cache::GlobalCache;
+
+use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, MySqlDataRepo, UserData};
+
+mod cache_data;
 
 #[derive(Clone)]
 pub struct CacheManager {

@@ -1,9 +1,9 @@
-use futures::channel::oneshot;
 use std::{thread, time::Duration};
 use std::collections::HashMap;
 use std::sync::Arc;
-use futures::FutureExt;
 
+use futures::channel::oneshot;
+use futures::FutureExt;
 
 #[tokio::main]
 async fn main() {

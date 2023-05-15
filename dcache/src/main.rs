@@ -1,15 +1,16 @@
-mod cache_data;
-
-use std::{env};
+use std::env;
 use std::sync::Arc;
+
 use actix_web::{App, HttpServer, web};
 use dotenv::dotenv;
-use log::info;
-use log4rs;
-use dcache::{CacheManager, get_cache, invalid_cache, get_cache_by_list_key, ping};
 use futures::future;
+use log4rs;
+use log::info;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 
+use dcache::{CacheManager, get_cache, get_cache_by_list_key, invalid_cache, ping};
+
+mod cache_data;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

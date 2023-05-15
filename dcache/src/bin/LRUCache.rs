@@ -1,7 +1,7 @@
-use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use lru::LruCache;
 
 pub struct DemoCache {
     cache: LruCache<Arc<String>, String>,

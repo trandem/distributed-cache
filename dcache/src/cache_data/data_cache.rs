@@ -1,22 +1,16 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use log::info;
-use tokio::sync::RwLock;
-use tokio::time::sleep;
+
 use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
-use sqlx::{MySql, Pool, Row};
-use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use log::info;
+use tokio::sync::RwLock;
 
-use crate::cache_data::dto::{MySqlDataRepo, KeyValue, UserData};
-use tokio::sync::mpsc::channel;
+use crate::cache_data::dto::{MySqlDataRepo, UserData};
 use crate::cache_data::dto;
-
 
 pub struct GlobalCache {
     num_shard: usize,
@@ -27,7 +21,7 @@ pub struct GlobalCache {
 
 impl GlobalCache
 {
-    pub fn new(num_shard: usize, shard_max_capacity: usize,data_repo:MySqlDataRepo) -> GlobalCache {
+    pub fn new(num_shard: usize, shard_max_capacity: usize, data_repo: MySqlDataRepo) -> GlobalCache {
         if num_shard == 0 {
             panic!("num_shard is zero");
         }
@@ -43,14 +37,14 @@ impl GlobalCache
             num_shard,
             shard_max_capacity,
             datasource_center,
-            data_repo:data_repo,
+            data_repo,
         }
     }
 
     pub async fn find_by_key(&self, k: i32) -> Option<Shared<Receiver<UserData>>> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
-        let mut lru_cache = datasource.read().await;
+        let lru_cache = datasource.read().await;
         let value_option = lru_cache.get(&k);
 
         if value_option.is_some() {
@@ -67,7 +61,7 @@ impl GlobalCache
                 return Some(value_option.unwrap().clone());
             }
             // one thread do loading data
-            let value = self.find_value_internet(k).await;
+            let value = self.find_value_repo(k).await;
             lru_cache.insert(k, value.shared());
 
             let value_option = lru_cache.get(&k);
@@ -96,12 +90,12 @@ impl GlobalCache
             }
         }
         if !not_existed_keys.is_empty() {
-            self.find_values_from_internet(&not_existed_keys, &mut output).await;
+            self.find_values_from_repo(&not_existed_keys, &mut output).await;
         }
         output
     }
 
-    async fn find_values_from_internet(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<UserData>>>>) {
+    async fn find_values_from_repo(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<UserData>>>>) {
         info!("find internet with keys {:?}",list_keys);
         let mut data = HashMap::new();
         for key in list_keys.iter() {
@@ -149,7 +143,7 @@ impl GlobalCache
     }
 
 
-    async fn find_value_internet(&self, k: i32) -> Receiver<UserData> {
+    async fn find_value_repo(&self, k: i32) -> Receiver<UserData> {
         let (sender, receiver) = oneshot::channel::<UserData>();
         let sql_pool = self.data_repo.clone();
         tokio::spawn(async move {
@@ -166,12 +160,5 @@ impl GlobalCache
         let hash_key = s.finish();
         let shard = hash_key % self.num_shard as u64;
         shard as usize
-    }
-
-    pub async fn is_key_exist(&self, k: i32) -> bool {
-        let shard = self.get_shard(k);
-        let datasource = self.datasource_center.get(shard).unwrap();
-        let lru_cache = datasource.read().await;
-        lru_cache.contains_key(&k)
     }
 }
