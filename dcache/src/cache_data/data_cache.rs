@@ -6,10 +6,10 @@ use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
-use log::info;
+use log::{error, info};
 use tokio::sync::RwLock;
 
-use crate::cache_data::dto::{MySqlDataRepo, UserData};
+use crate::cache_data::dto::{ERROR_DATA, MySqlDataRepo, UserData};
 use crate::cache_data::dto;
 
 pub struct GlobalCache {
@@ -147,8 +147,14 @@ impl GlobalCache
         let (sender, receiver) = oneshot::channel::<UserData>();
         let sql_pool = self.data_repo.clone();
         tokio::spawn(async move {
-            let user_data = sql_pool.find_by_key(k).await;
-            sender.send(user_data)
+            let result_data = sql_pool.find_by_key(k).await;
+            if result_data.is_ok() {
+                let user_data = result_data.unwrap();
+                sender.send(user_data)
+            } else {
+                error!("query fail with data {:?} ",result_data.err());
+                sender.send(ERROR_DATA)
+            }
         });
 
         receiver

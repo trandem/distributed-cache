@@ -1,5 +1,6 @@
+use log::error;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, MySql, Pool};
+use sqlx::{Error, FromRow, MySql, Pool};
 
 #[derive(Deserialize, Debug)]
 pub struct GetCacheByListKeyRequest {
@@ -18,22 +19,14 @@ pub struct MySqlDataRepo {
 }
 
 impl MySqlDataRepo {
-    pub async fn find_by_key(&self, key: i32) -> UserData {
+    pub async fn find_by_key(&self, key: i32) -> Result<UserData, Error> {
         let sql_pool = self.sql_pool.clone();
 
         let row = sqlx::query_as::<_, UserData>("SELECT id, name from user_data WHERE id = ?")
             .bind(key)
             .fetch_one(&sql_pool)
             .await;
-
-        match row {
-            Ok(data) => {
-                data
-            }
-            Err(e) => {
-                EMPTY_DATA
-            }
-        }
+        row
     }
 
     pub async fn find_by_mul_key(&self, keys: &Vec<i32>) -> Vec<UserData> {
@@ -50,7 +43,10 @@ impl MySqlDataRepo {
         let rows = query.fetch_all(&sql_pool).await;
         match rows {
             Ok(list) => list,
-            _ => vec![]
+            Err(e) =>{
+                error!("query fail with data {:?} ",e);
+                vec![ERROR_DATA]
+            }
         }
     }
 }
@@ -61,8 +57,19 @@ pub const EMPTY_DATA: UserData = UserData {
     name: None,
 };
 
-#[derive(Serialize, Debug, Clone, FromRow)]
+pub const ERROR_DATA: UserData = UserData {
+    id: Some(-1),
+    name: None,
+};
+
+#[derive(Serialize, Debug, Clone, FromRow,PartialEq)]
 pub struct UserData {
     pub id: Option<i32>,
     pub name: Option<String>,
 }
+
+#[derive(Serialize,Deserialize, Debug, Clone, FromRow,PartialEq)]
+pub struct InvalidCache {
+    pub id: Option<i32>
+}
+

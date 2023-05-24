@@ -7,7 +7,7 @@ use sqlx::{MySql, Pool};
 
 use cache_data::data_cache::GlobalCache;
 
-use crate::cache_data::dto::{GetCacheByListKeyRequest, KeyValue, MySqlDataRepo, UserData};
+use crate::cache_data::dto::{ERROR_DATA, GetCacheByListKeyRequest, KeyValue, MySqlDataRepo, UserData};
 
 mod cache_data;
 
@@ -23,6 +23,9 @@ impl CacheManager {
             GlobalCache::new(num_shard, shard_max_capacity, repo)
         );
         CacheManager { global_cache }
+    }
+    pub fn get_cache(&self) -> Arc<GlobalCache>{
+        self.global_cache.clone()
     }
 }
 
@@ -68,7 +71,12 @@ async fn get_value_by_key(cache_manager: Data<Arc<CacheManager>>, key: i32) -> O
         return None;
     }
     let result = cache_data.unwrap().clone().await;
-    Some(result.unwrap().clone())
+    let data = result.unwrap().clone();
+    if data ==ERROR_DATA {
+        info!("error when query do in valid {}",key);
+        cache_manager.global_cache.invalid(key).await;
+    }
+    Some(data)
 }
 
 #[post("/get_caches")]
@@ -91,18 +99,5 @@ pub async fn get_cache_by_list_key(
         "result" : result,
     });
     HttpResponse::Ok().json(json_response)
-}
-
-#[get("/invalid_cache/{key}")]
-pub async fn invalid_cache(
-    mut cache_manager: web::Data<Arc<CacheManager>>,
-    path: web::Path<(i32, )>,
-) -> Option<String> {
-    let key = path.into_inner().0;
-    let cache_data = cache_manager.global_cache.invalid(key).await;
-    if cache_data.is_none() {
-        return None;
-    }
-    Some("success".to_string())
 }
 
