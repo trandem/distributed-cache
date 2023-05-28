@@ -1,16 +1,20 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::iter::Map;
+use std::sync::Arc;
 
 use futures::channel::oneshot;
 use futures::channel::oneshot::Receiver;
 use futures::future::Shared;
 use futures::FutureExt;
-use log::{error, info};
+use log::{error, info, log};
+use sqlx::{MySql, Pool};
 use tokio::sync::RwLock;
 
-use crate::cache_data::dto::{ERROR_DATA, MySqlDataRepo, UserData};
+use crate::cache_data::dto::{EMPTY_DATA, ERROR_DATA, UserData};
 use crate::cache_data::dto;
+use crate::cache_data::repo::{DataRepo, MySqlDataRepo};
 
 pub struct GlobalCache {
     num_shard: usize,
@@ -41,39 +45,41 @@ impl GlobalCache
         }
     }
 
-    pub async fn find_by_key(&self, k: i32) -> Option<Shared<Receiver<UserData>>> {
+    pub async fn find_by_key(&self, k: i32) -> Option<UserData> {
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let lru_cache = datasource.read().await;
-        let value_option = lru_cache.get(&k);
 
-        if value_option.is_some() {
-            return Some(value_option.unwrap().clone());
-        } else {
-            drop(lru_cache);
-            let mut lru_cache = datasource.write().await;
-            // concurrent two or multithreading can reach here so we recheck key exited
-            if lru_cache.contains_key(&k) {
-                let value_option = lru_cache.get_mut(&k);
-                if value_option.is_none() {
-                    return None;
+        return match lru_cache.get(&k) {
+            Some(value) => {
+                Some(value.clone().await.unwrap().clone())
+            },
+            None => {
+                drop(lru_cache);
+                let mut lru_cache = datasource.write().await;
+                // concurrent two or multithreading can reach here so we recheck key exited
+                if lru_cache.contains_key(&k) {
+                    let value = lru_cache.get(&k).unwrap().clone();
+                    return Some(value.await.unwrap().clone());
                 }
-                return Some(value_option.unwrap().clone());
-            }
-            // one thread do loading data
-            let value = self.find_value_repo(k).await;
-            lru_cache.insert(k, value.shared());
+                // one thread do loading data
+                let value = self.find_value_repo(k).await.shared();
+                lru_cache.insert(k, value.clone());
 
-            let value_option = lru_cache.get(&k);
-            if value_option.is_none() {
-                return None;
+                let user_data = value.clone().await.unwrap().clone();
+
+                if user_data == ERROR_DATA {
+                    drop(lru_cache);
+                    self.invalid(k).await;
+                }
+
+                Some(user_data)
             }
-            return Some(value_option.unwrap().clone());
         }
     }
 
-    pub async fn find_by_keys(&self, list_key: &Vec<i32>) -> Vec<Option<Shared<Receiver<UserData>>>> {
-        let mut output = Vec::with_capacity(list_key.len());
+    pub async fn find_by_keys(&self, list_key: &Vec<i32>) -> Vec<Option<UserData>> {
+        let mut map_future_data = HashMap::with_capacity(list_key.len());
         let mut not_existed_keys = vec![];
 
         for k in list_key.iter() {
@@ -84,79 +90,110 @@ impl GlobalCache
             let value_option = lru_cache.get(&k);
 
             if value_option.is_some() {
-                output.push(Some(value_option.unwrap().clone()))
+                map_future_data.insert(k, Some(value_option.unwrap().clone()));
             } else {
                 not_existed_keys.push(k);
             }
         }
         if !not_existed_keys.is_empty() {
-            self.find_values_from_repo(&not_existed_keys, &mut output).await;
+            let data_from_repo = self.find_values_from_repo(&not_existed_keys).await;
+            map_future_data.extend(data_from_repo);
+        }
+
+        let mut output = Vec::with_capacity(list_key.len());
+
+        for (key,future) in map_future_data {
+            let value = future.unwrap().await.unwrap().clone();
+            if value == ERROR_DATA {
+                self.invalid(key).await;
+            }
+            output.push(Some(value));
         }
         output
     }
 
-    async fn find_values_from_repo(&self, list_keys: &Vec<i32>, results: &mut Vec<Option<Shared<Receiver<UserData>>>>) {
+    async fn find_values_from_repo(&self, list_keys: &Vec<i32>) -> HashMap<i32,Option<Shared<Receiver<UserData>>>> {
+        let mut output = HashMap::new();
         info!("find internet with keys {:?}",list_keys);
-        let mut data = HashMap::new();
+        let mut sender_map_by_key = HashMap::new();
         for key in list_keys.iter() {
             let key = *key;
             let (sender, receiver) = oneshot::channel::<UserData>();
-            data.insert(key, sender);
+            sender_map_by_key.insert(key, sender);
 
             let shard = self.get_shard(key);
 
             let datasource = self.datasource_center.get(shard).unwrap();
             let mut lru_cache = datasource.write().await;
-            lru_cache.insert(key, receiver.shared());
-            let value_option = lru_cache.get(&key);
-
-            results.push(Some(value_option.unwrap().clone()));
+            let share_receiver = receiver.shared();
+            lru_cache.insert(key, share_receiver.clone());
+            output.insert(key,Some(share_receiver));
         }
 
         let sql_pool = self.data_repo.clone();
 
         tokio::spawn(async move {
-            let keys: Vec<i32> = data.keys().cloned().collect();
+            let keys: Vec<i32> = sender_map_by_key.keys().cloned().collect();
 
             let rows = sql_pool.find_by_mul_key(&keys).await;
-
-            let mut map = rows.iter()
-                .map(|data| (data.id.unwrap(), data.clone()))
-                .collect::<HashMap<i32, UserData>>();
+            let mut is_error = false;
+            let mut user_data_map_by_key = HashMap::new();
+            match rows {
+                Ok(values) => {
+                    for user_data in values {
+                        let key = user_data.id.unwrap();
+                        user_data_map_by_key.insert(key, user_data);
+                    }
+                }
+                Err(error) => {
+                    error!("query to repo error {:?}", error);
+                    is_error = true;
+                }
+            }
 
             for key in keys.iter() {
                 let key = *key;
-                let sender = data.remove(&key).unwrap();
-                match map.remove(&key) {
-                    None => sender.send(dto::EMPTY_DATA),
-                    Some(d) => sender.send(d)
-                }.expect("TODO: panic message");
+                let sender = sender_map_by_key.remove(&key).unwrap();
+                if is_error {
+                    sender.send(ERROR_DATA).expect("cannot send error at multi");
+                } else {
+                    match user_data_map_by_key.remove(&key) {
+                        None => sender.send(dto::EMPTY_DATA),
+                        Some(d) => sender.send(d)
+                    }.expect("cannot send data at multi");
+                }
             }
         });
+        output
     }
 
     pub async fn invalid(&self, k: i32) -> Option<Shared<Receiver<UserData>>> {
+        info!("invalid data {}",k);
         let shard = self.get_shard(k);
         let datasource = self.datasource_center.get(shard).unwrap();
         let mut lru_cache = datasource.write().await;
         lru_cache.remove(&k)
     }
 
-
     async fn find_value_repo(&self, k: i32) -> Receiver<UserData> {
         let (sender, receiver) = oneshot::channel::<UserData>();
         let sql_pool = self.data_repo.clone();
         tokio::spawn(async move {
             let result_data = sql_pool.find_by_key(k).await;
-            if result_data.is_ok() {
-                let user_data = result_data.unwrap();
-                sender.send(user_data)
-            } else {
-                error!("query fail with data {:?} ",result_data.err());
-                sender.send(ERROR_DATA)
+
+            match result_data {
+                Ok(user_data) => {
+                    sender.send(user_data).expect("cannot send data to receiver");
+                }
+                Err(sqlx::Error::RowNotFound) => {
+                    sender.send(EMPTY_DATA).expect("cannot send empty to receiver");
+                }
+                Err(e) => {
+                    error!("query fail with data {:?} ",e);
+                    sender.send(ERROR_DATA).expect("cannot send error to receiver");
+                }
             }
         });
-
         receiver
     }
 
